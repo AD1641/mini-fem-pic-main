@@ -1,0 +1,19 @@
+# System parameters
+plasma_den     = 1e10
+ion_velocity   = 7000
+wall_potential = 100
+plasma_species = Oxygen
+
+# Simulation parameters
+max_iter = 250
+dt       = 1e-7
+fesolver_method = linear
+
+# Input files
+global_mesh = mesh.dat
+inlet_mesh  = inlet.dat
+wall_mesh   = fixed.dat
+
+invert_normals = true
+
+

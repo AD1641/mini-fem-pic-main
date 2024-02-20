@@ -1,0 +1,20 @@
+# System parameters
+plasma_den     = 1e16
+ion_velocity   = 1e8
+electron_temperature = 2e8
+wall_potential = 10000
+plasma_species = Duterium
+
+# Simulation parameters
+max_iter = 250
+dt       = 1e-12
+fesolver_method = lapack
+
+# Input files
+global_mesh = mesh.dat
+inlet_mesh  = inlet.dat
+wall_mesh   = wall.dat
+
+invert_normals = false
+
+
