@@ -1,5 +1,16 @@
 # mini-pic
+module load intel
 
+module load OpenBLAS
+
+cd mini-pic-fem-main
+mkdir build
+cd build
+cmake -DCMAKE_CXX_COMPILER=icpx ..
+make
+
+cd mini-pic-fem-main/examples/one_stream/coarse
+../../../build/mini-pic system.param
 ## Introduction
 Prototype implementation of the PIC (Particle In Cell) algorithm on unstructured grids
 
