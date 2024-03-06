@@ -141,23 +141,24 @@ int main(int argc, char **argv) {
         {
             sycl::queue q(sycl::default_selector{});
 
-            sycl::buffer<double,1> d_ions_den {ions.den.data(), sycl::range<1>(ions.den.size())};
-            sycl::buffer<double,1> d_max_den {max_den, sycl::range<1>(max_den.size())};
+            sycl::buffer<double,1> d_ions_den {ions.den, sycl::range<1>(sizeof(ions.den))};
+            sycl::buffer<double,1> d_max_den {max_den, sycl::range<1>(sizeof(max_den))};
 
-            q.submit ([&](sycl::handler& h)){
+            q.submit ([&](sycl::handler& h){
                 auto ION_DEN = d_ions_den.template get_access<sycl::access::mode::read>(h);
                 auto MAX_DEN = d_max_den.template get_access<sycl::access::mode::write>(h);
 
-                h.parallel_for(sycl::<1>{n_nodes,[=] (sycl::id<1> i)})
+                h.parallel_for(sycl::range<1>{n_nodes},[=] (sycl::id<1> i)
                 {
                     if(ION_DEN[i] > MAX_DEN)
                     {
                         MAX_DEN = ION_DEN[i];
                     }
-                }
-            }
+                });
+            }).wait();
         }
-
+     
+    
         double max_phi=0;
 
 

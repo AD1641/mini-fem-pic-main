@@ -27,7 +27,7 @@ endif()
 
 target_link_libraries(mini-pic PUBLIC ${lapackblas_libraries} ${omp_libraries})
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fsycl -o")
+set(CMAKE_CXX_FLAGS " -g -fsycl -o")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
