@@ -319,6 +319,59 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
             }
         }
 
+
+
+        {
+            auto part_it_start = ions.particles.begin();
+            auto part_it_end = ions.particles.end();
+            Particle &part = *part_it_start;
+            double ef_part[3];
+
+            sycl::queue q(sycl::default_selector{});
+
+            
+
+            q.submit ([&](sycl::handler& h){
+                
+                
+                h.parallel_for(sycl::range<1>{},[=] (sycl::id<1> i)
+                {
+                    Particle &part = *part_it;
+
+                    /*update particle velocity*/
+                    double ef_part[3];
+                    solver.evalEf(ef_part, part.cell_index);
+
+                    for (int i=0;i<3;i++)
+                        part.vel[i] += ions.charge/ions.mass*ef_part[i]*params.dt;
+
+                    /*update particle positions*/
+                    for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*params.dt;
+
+                    //trace::current.enter("XtoLtet");
+                    bool inside = XtoLtet(part,volume);
+                    //trace::current.exit("XtoLtet");
+
+                    if (inside) {
+                        Tetra &tet = volume.elements[part.cell_index];
+                        /*now we know that we are inside this tetrahedron, scatter*/
+                        double sum=0;
+                        for (int v=0;v<4;v++) {
+                            #pragma omp atomic update
+                            ions.den[tet.con[v]]+=part.lc[v];
+                            sum+=part.lc[v];    /*for testing*/
+                        }
+
+                        /*testing*/
+                        if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
+
+                        thread_newparts.push_back(part);
+                    }
+                
+                });
+            }).wait();
+        }
+
         #pragma omp master
         {
             ions.particles.clear();
