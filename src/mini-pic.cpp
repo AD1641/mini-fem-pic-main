@@ -81,31 +81,6 @@ int main(int argc, char **argv) {
         else solver.g[n]=0;    /*default*/
     }
 
-    // sycl::queue q(sycl::default_selector{});
-
-    // sycl::buffer<double,1> d_solver_g {solver.g.data(), sycl::range<1>(solver.g.size())};
-    // sycl::buffer<double,1> d_params_wall_pot {params.wall_potential, sycl::range<1>(params.wall_potential.size())};
-
-    // q.submit ([&](sycl::handler& h)){
-    //     auto G = d_solver_g.template get_access<sycl::access::mode::write>(h);
-    //     auto P = d_params_wall_pot.template get_access<sycl::access::mode::read>(h);
-
-    //     h.parallel_for(sycl::<1>{n_nodes,[=] (sycl::id<1> i)})
-    //     {
-    //         if(volume.nodes[i].type == INLET)
-    //         {
-    //             G[i] = 0;
-    //         }
-    //         else if (volume.nodes[n].type==FIXED)
-    //         {
-    //             G[i] =- P;
-    //         }
-    //         else
-    //         {
-    //             G[i] = 0;
-    //         }
-    //     }
-    // }
 
 
     /*sample assembly code*/
@@ -137,28 +112,8 @@ int main(int argc, char **argv) {
 
         /*check values*/
         double max_den=0;
-        //for (int n=0;n<n_nodes;n++) if (ions.den[n]>max_den) max_den=ions.den[n];
-        {
-            sycl::queue q(sycl::default_selector{});
-
-            sycl::buffer<double,1> d_ions_den {ions.den, sycl::range<1>(sizeof(ions.den))};
-            sycl::buffer<double,1> d_max_den {max_den, sycl::range<1>(1)};
-
-            q.submit ([&](sycl::handler& h){
-                auto ION_DEN = d_ions_den.template get_access<sycl::access::mode::read>(h);
-                auto MAX_DEN = d_max_den.template get_access<sycl::access::mode::write>(h);
-                //sycl::accessor ION_DEN{d_ions_den, h};
-                //sycl::accessor MAX_DEN{d_max_den, h};
-                h.parallel_for(sycl::range<1>{static_cast<unsigned long>(n_nodes)},[=] (sycl::id<1> i)
-                {
-                    if(ION_DEN[i] > MAX_DEN)
-                    {
-                        MAX_DEN = ION_DEN[i];
-                    }
-                });
-            }).wait();
-        }
-     
+        for (int n=0;n<n_nodes;n++) if (ions.den[n]>max_den) max_den=ions.den[n];
+        
     
         double max_phi=0;
 
@@ -322,43 +277,51 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
 
         {
-            auto part_it_start = ions.particles.begin();
-            auto part_it_end = ions.particles.end();
-            Particle &part = *part_it_start;
-            double ef_part[3];
+         
 
             sycl::queue q(sycl::default_selector{});
+            sycl::buffer<Species,1> d_ions {ions, sycl::range<1>(sizeof(ions))};
+            sycl::buffer<Volume,1> d_volume {volume, sycl::range<1>(sizeof(volume))};
+            sycl::buffer<FESolver,1> d_solver {solver, sycl::range<1>(sizeof(solver))};
+            sycl::buffer<Parameters,1> d_params {params, sycl::range<1>(sizeof(params))};
+
+            
 
             
 
             q.submit ([&](sycl::handler& h){
                 
+                auto IONS = d_ions.template get_access<sycl::access::mode::read>(h);
+                auto VOLUME = d_volumes.template get_access<sycl::access::mode::read>(h);
+                auto SOLVER = d_solver.template get_access<sycl::access::mode::read>(h);
+                auto PARAMS = d_params.template get_access<sycl::access::mode::read>(h);
+                std::vector<Particle> thread_newparts;
                 
-                h.parallel_for(sycl::range<1>{},[=] (sycl::id<1> i)
+                h.parallel_for(sycl::range<1>{IONS.particles.begin() - IONS.particles.end()},[=] (sycl::id<1> i)
                 {
                     Particle &part = *part_it;
 
                     /*update particle velocity*/
                     double ef_part[3];
-                    solver.evalEf(ef_part, part.cell_index);
+                    SOLVER.evalEf(ef_part, part.cell_index);
 
                     for (int i=0;i<3;i++)
-                        part.vel[i] += ions.charge/ions.mass*ef_part[i]*params.dt;
+                        part.vel[i] += IONS.charge/IONS.mass*ef_part[i]*PARAMS.dt;
 
                     /*update particle positions*/
-                    for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*params.dt;
+                    for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*PARAMS.dt;
 
                     //trace::current.enter("XtoLtet");
-                    bool inside = XtoLtet(part,volume);
+                    bool inside = XtoLtet(part,VOLUME);
                     //trace::current.exit("XtoLtet");
 
                     if (inside) {
-                        Tetra &tet = volume.elements[part.cell_index];
+                        Tetra &tet = VOLUME.elements[part.cell_index];
                         /*now we know that we are inside this tetrahedron, scatter*/
                         double sum=0;
                         for (int v=0;v<4;v++) {
                             #pragma omp atomic update
-                            ions.den[tet.con[v]]+=part.lc[v];
+                            IONS.den[tet.con[v]]+=part.lc[v];
                             sum+=part.lc[v];    /*for testing*/
                         }
 
