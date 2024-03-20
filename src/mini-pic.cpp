@@ -236,43 +236,43 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     /*reset ion density*/
     for (int i=0;i<n_nodes;i++) ions.den[i] = 0;
 
-    #pragma omp parallel
+    //#pragma omp parallel
     {
-        std::vector<Particle> thread_newparts;
-        #pragma omp for
-        for (auto part_it = ions.particles.begin(); part_it != ions.particles.end(); part_it++) {
-            Particle &part = *part_it;
+        // std::vector<Particle> thread_newparts;
+        // #pragma omp for
+        // for (auto part_it = ions.particles.begin(); part_it != ions.particles.end(); part_it++) {
+        //     Particle &part = *part_it;
 
-            /*update particle velocity*/
-            double ef_part[3];
-            solver.evalEf(ef_part, part.cell_index);
+        //     /*update particle velocity*/
+        //     double ef_part[3];
+        //     solver.evalEf(ef_part, part.cell_index);
 
-            for (int i=0;i<3;i++)
-                part.vel[i] += ions.charge/ions.mass*ef_part[i]*params.dt;
+        //     for (int i=0;i<3;i++)
+        //         part.vel[i] += ions.charge/ions.mass*ef_part[i]*params.dt;
 
-            /*update particle positions*/
-            for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*params.dt;
+        //     /*update particle positions*/
+        //     for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*params.dt;
 
-            //trace::current.enter("XtoLtet");
-            bool inside = XtoLtet(part,volume);
-            //trace::current.exit("XtoLtet");
+        //     //trace::current.enter("XtoLtet");
+        //     bool inside = XtoLtet(part,volume);
+        //     //trace::current.exit("XtoLtet");
 
-            if (inside) {
-                Tetra &tet = volume.elements[part.cell_index];
-                /*now we know that we are inside this tetrahedron, scatter*/
-                double sum=0;
-                for (int v=0;v<4;v++) {
-                    #pragma omp atomic update
-                    ions.den[tet.con[v]]+=part.lc[v];
-                    sum+=part.lc[v];    /*for testing*/
-                }
+        //     if (inside) {
+        //         Tetra &tet = volume.elements[part.cell_index];
+        //         /*now we know that we are inside this tetrahedron, scatter*/
+        //         double sum=0;
+        //         for (int v=0;v<4;v++) {
+        //             #pragma omp atomic update
+        //             ions.den[tet.con[v]]+=part.lc[v];
+        //             sum+=part.lc[v];    /*for testing*/
+        //         }
 
-                /*testing*/
-                if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
+        //         /*testing*/
+        //         if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
 
-                thread_newparts.push_back(part);
-            }
-        }
+        //         thread_newparts.push_back(part);
+        //     }
+        // }
 
 
 
@@ -292,14 +292,17 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
             q.submit ([&](sycl::handler& h){
                 
                 auto IONS = d_ions.template get_access<sycl::access::mode::read>(h);
-                auto VOLUME = d_volumes.template get_access<sycl::access::mode::read>(h);
+                auto VOLUME = d_volume.template get_access<sycl::access::mode::read>(h);
                 auto SOLVER = d_solver.template get_access<sycl::access::mode::read>(h);
                 auto PARAMS = d_params.template get_access<sycl::access::mode::read>(h);
+
                 std::vector<Particle> thread_newparts;
                 
-                h.parallel_for(sycl::range<1>{IONS.particles.begin() - IONS.particles.end()},[=] (sycl::id<1> i)
+                auto iter = IONS.particles.end() - IONS.particles.begin();
+                
+                h.parallel_for(sycl::range<1>{iter},[=] (sycl::id<1> i)
                 {
-                    Particle &part = *part_it;
+                    Particle &part = IONS.particles.begin() + i
 
                     /*update particle velocity*/
                     double ef_part[3];
