@@ -277,61 +277,64 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
 
         {
-         
+            sycl::queue q(sycl::property::queue::in_order{});
 
-            sycl::queue q(sycl::default_selector{});
-            sycl::buffer<Species,1> d_ions {ions, sycl::range<1>(sizeof(ions))};
-            sycl::buffer<Volume,1> d_volume {volume, sycl::range<1>(sizeof(volume))};
-            sycl::buffer<FESolver,1> d_solver {solver, sycl::range<1>(sizeof(solver))};
-            sycl::buffer<Parameters,1> d_params {params, sycl::range<1>(sizeof(params))};
+            // Species *s_ions = malloc_shared<Species>(sizeof(ions),q);
+            // Volume *s_volume = malloc_shared<Volume>(sizeof(volume),q);
+            // FESolver *s_solver = malloc_shared<FESolver>(sizeof(solver),q);
+            // Parameters *s_params = malloc_shared<Parameters>(sizeof(params),q);
+            std::vector<Particle> thread_newparts;
 
-            
-
+            Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
+            Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
+            FESolver *s_solver = static_cast<FESolver *>(malloc_device(sizeof(solver), q));
+            Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
+            std::vector<Particle> *s_thread_newparts = static_cast<std::vector<Particle> *>(malloc_device(sizeof(thread_newparts), q));
             
 
             q.submit ([&](sycl::handler& h){
                 
-                auto IONS = d_ions.template get_access<sycl::access::mode::read>(h);
-                auto VOLUME = d_volume.template get_access<sycl::access::mode::read>(h);
-                auto SOLVER = d_solver.template get_access<sycl::access::mode::read>(h);
-                auto PARAMS = d_params.template get_access<sycl::access::mode::read>(h);
+                q.memcpy(s_ions, &ions, sizeof(ions));
+                q.memcpy(s_volume, &volume, sizeof(volume));
+                q.memcpy(s_solver, &solver, sizeof(solver));
+                q.memcpy(s_params, &params, sizeof(params));
+                q.memcpy(s_thread_newparts, &thread_newparts, sizeof(thread_newparts));
 
-                std::vector<Particle> thread_newparts;
                 
-                auto iter = IONS.particles.end() - IONS.particles.begin();
+                auto iter = s_ions->particles.end() - s_ions->particles.begin();
                 
-                h.parallel_for(sycl::range<1>{iter},[=] (sycl::id<1> i)
+                h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
                 {
-                    Particle &part = IONS.particles.begin() + i
+                    auto &part = s_ions->particles.begin() + i;
 
                     /*update particle velocity*/
                     double ef_part[3];
-                    SOLVER.evalEf(ef_part, part.cell_index);
+                    solver.evalEf(ef_part, part->cell_index);
 
                     for (int i=0;i<3;i++)
-                        part.vel[i] += IONS.charge/IONS.mass*ef_part[i]*PARAMS.dt;
+                        part->vel[i] += s_ions->charge/s_ions->mass*ef_part[i]*s_params->dt;
 
                     /*update particle positions*/
-                    for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*PARAMS.dt;
+                    for (int i=0;i<3;i++) part->pos[i]+=part->vel[i]*s_params->dt;
 
                     //trace::current.enter("XtoLtet");
-                    bool inside = XtoLtet(part,VOLUME);
+                    bool inside = XtoLtet(part,s_volume);
                     //trace::current.exit("XtoLtet");
 
                     if (inside) {
-                        Tetra &tet = VOLUME.elements[part.cell_index];
+                        Tetra &tet = s_volume->elements[part->cell_index];
                         /*now we know that we are inside this tetrahedron, scatter*/
                         double sum=0;
                         for (int v=0;v<4;v++) {
                             #pragma omp atomic update
-                            IONS.den[tet.con[v]]+=part.lc[v];
-                            sum+=part.lc[v];    /*for testing*/
+                            s_ions->den[tet.con[v]]+=part->lc[v];
+                            sum+=part->lc[v];    /*for testing*/
                         }
 
                         /*testing*/
                         if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
 
-                        thread_newparts.push_back(part);
+                        s_thread_newparts->push_back(part);
                     }
                 
                 });

@@ -15,6 +15,7 @@
 
 #include <vector>
 #include <string>
+#include <CL/sycl.hpp>
 
 /*particle*/
 struct Particle {
@@ -39,6 +40,10 @@ public:
     Species (int n_nodes, Name species);
     ~Species () {delete[] den;}
 };
+
+// template<>
+// struct sycl::is_device_copyable<Species> : std::true_type {};
+// struct sycl::is_device_copyable<Particle> : std::true_type {};
 
 
 void OutputParticles(std::vector<Particle> &particles);

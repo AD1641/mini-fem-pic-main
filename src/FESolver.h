@@ -12,6 +12,7 @@
 
 #ifndef FESOLVER_H
 #define FESOLVER_H
+#include <CL/sycl.hpp>
 
 #include "meshes.h"
 
@@ -75,11 +76,12 @@ public:
     void summarize(std::ostream &out);
 
     void buildJmatrix(Method method);
+    Volume &volume;
 
 protected:
     void computeNX();
 
-    Volume &volume;
+    
     int n_nodes;
     int n_elements;    /*save this so we can properly deallocate LM*/
 
@@ -88,6 +90,9 @@ protected:
     double W[2];
     int n_int;
 };
+// template<>
+// struct sycl::is_device_copyable<FESolver> : std::true_type {};
+
 
 
 #endif /* !FESOLVER_H */

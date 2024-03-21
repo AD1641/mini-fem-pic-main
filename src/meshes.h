@@ -15,6 +15,7 @@
 
 #include <vector>
 #include <string>
+#include <CL/sycl.hpp>
 
 #include "particles.h"
 
@@ -62,6 +63,8 @@ struct Volume {
 
     void summarize(std::ostream &out);
 };
+// template<>
+// struct sycl::is_device_copyable<Volume> : std::true_type {};
 
 bool LoadVolumeMesh(const std::string file_name, Volume &volume);
 bool LoadSurfaceMesh(const std::string file_name, Volume &volume, NodeType node_type, bool invert_faces);

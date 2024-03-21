@@ -27,4 +27,4 @@ Based on the `fem-pic` application by Lubos Brieda for Advanced PIC 2015 Lesson 
 # mini-pic-sycl
 
 
-rm -rf build; mkdir build; cd build; cmake -DCMAKE_CXX_COMPILER=icpx ..
+rm -rf build; mkdir build; cd build; cmake -DCMAKE_CXX_COMPILER=icpx ..; make
