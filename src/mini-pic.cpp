@@ -305,7 +305,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                 
                 h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
                 {
-                    auto &part = s_ions->particles.begin() + i;
+                    auto part = s_ions->particles.begin() + i;
 
                     /*update particle velocity*/
                     double ef_part[3];
@@ -318,7 +318,37 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                     for (int i=0;i<3;i++) part->pos[i]+=part->vel[i]*s_params->dt;
 
                     //trace::current.enter("XtoLtet");
-                    bool inside = XtoLtet(part,s_volume);
+                    //bool inside = XtoLtet(part,s_volume);
+                    
+                    auto &tet = s_volume->elements[part->cell_index];
+
+                    bool inside = true;
+                    /*loop over vertices*/
+                    for (int i=0;i<4;i++) {
+                        part->lc[i] = (1.0/6.0)*(tet.alpha[i] - part->pos[0]*tet.beta[i] +
+                                    part->pos[1]*tet.gamma[i] - part->pos[2]*tet.delta[i])/tet.volume;
+                        if (part->lc[i]<0 || part->lc[i]>1.0) inside=false;
+                    }
+
+                    //if (inside) return true;
+                    if (!inside){
+                    //if (!search) return false;
+                    /*we are outside the last known tet, find most negative weight*/
+                    int min_i=0;
+                    double min_lc=part->lc[0];
+                    for (int i=1;i<4;i++)
+                        if (part->lc[i]<min_lc) {min_lc=part->lc[i];min_i=i;}
+
+                    /*is there a neighbor in this direction?*/
+                    if (tet.cell_con[min_i]>=0) {
+                        part->cell_index = tet.cell_con[min_i];
+                        //return XtoLtet(part,volume);
+                    }
+
+                    inside = false;
+                    }
+                        
+                    
                     //trace::current.exit("XtoLtet");
 
                     if (inside) {
