@@ -309,7 +309,9 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
                     /*update particle velocity*/
                     double ef_part[3];
-                    solver.evalEf(ef_part, part->cell_index);
+                    //s_solver->evalEf(ef_part, part->cell_index);
+
+                    for (int i=0;i<3;i++) ef_part[i]=s_solver->ef[part->cell_index][i];
 
                     for (int i=0;i<3;i++)
                         part->vel[i] += s_ions->charge/s_ions->mass*ef_part[i]*s_params->dt;
