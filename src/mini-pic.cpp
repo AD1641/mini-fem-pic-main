@@ -24,6 +24,7 @@
 #include "particles.h"
 #include "meshes.h"
 #include "FESolver.h"
+#include"kernel.h"
 
 /*constants*/
 
@@ -236,153 +237,118 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     /*reset ion density*/
     for (int i=0;i<n_nodes;i++) ions.den[i] = 0;
 
-    //#pragma omp parallel
-    {
-        // std::vector<Particle> thread_newparts;
-        // #pragma omp for
-        // for (auto part_it = ions.particles.begin(); part_it != ions.particles.end(); part_it++) {
-        //     Particle &part = *part_it;
+    sycl::queue q(sycl::property::queue::in_order{});
 
-        //     /*update particle velocity*/
-        //     double ef_part[3];
-        //     solver.evalEf(ef_part, part.cell_index);
+    std::vector<Particle> thread_newparts;
 
-        //     for (int i=0;i<3;i++)
-        //         part.vel[i] += ions.charge/ions.mass*ef_part[i]*params.dt;
+    Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
+    Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
+    FESolver *s_solver = static_cast<FESolver *>(malloc_device(sizeof(solver), q));
+    Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
+    std::vector<Particle> *s_thread_newparts = static_cast<std::vector<Particle> *>(malloc_device(sizeof(thread_newparts), q));
+    
 
-        //     /*update particle positions*/
-        //     for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*params.dt;
+    q.submit ([&](sycl::handler& h){
+        
+        q.memcpy(s_ions, &ions, sizeof(ions));
+        q.memcpy(s_volume, &volume, sizeof(volume));
+        q.memcpy(s_solver, &solver, sizeof(solver));
+        q.memcpy(s_params, &params, sizeof(params));
+        q.memcpy(s_thread_newparts, &thread_newparts, sizeof(thread_newparts));
 
-        //     //trace::current.enter("XtoLtet");
-        //     bool inside = XtoLtet(part,volume);
-        //     //trace::current.exit("XtoLtet");
-
-        //     if (inside) {
-        //         Tetra &tet = volume.elements[part.cell_index];
-        //         /*now we know that we are inside this tetrahedron, scatter*/
-        //         double sum=0;
-        //         for (int v=0;v<4;v++) {
-        //             #pragma omp atomic update
-        //             ions.den[tet.con[v]]+=part.lc[v];
-        //             sum+=part.lc[v];    /*for testing*/
-        //         }
-
-        //         /*testing*/
-        //         if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
-
-        //         thread_newparts.push_back(part);
-        //     }
-        // }
-
-
-
+        
+        auto iter = s_ions->particles.end() - s_ions->particles.begin();
+        
+        h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
         {
-            sycl::queue q(sycl::property::queue::in_order{});
+            auto part = s_ions->particles.begin() + i;
 
-            // Species *s_ions = malloc_shared<Species>(sizeof(ions),q);
-            // Volume *s_volume = malloc_shared<Volume>(sizeof(volume),q);
-            // FESolver *s_solver = malloc_shared<FESolver>(sizeof(solver),q);
-            // Parameters *s_params = malloc_shared<Parameters>(sizeof(params),q);
-            std::vector<Particle> thread_newparts;
+            /*update particle velocity*/
+            double ef_part[3];
+            //s_solver->evalEf(ef_part, part->cell_index);
 
-            Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
-            Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
-            FESolver *s_solver = static_cast<FESolver *>(malloc_device(sizeof(solver), q));
-            Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
-            std::vector<Particle> *s_thread_newparts = static_cast<std::vector<Particle> *>(malloc_device(sizeof(thread_newparts), q));
-            
+            for (int i=0;i<3;i++) ef_part[i]=s_solver->ef[part->cell_index][i];
 
-            q.submit ([&](sycl::handler& h){
-                
-                q.memcpy(s_ions, &ions, sizeof(ions));
-                q.memcpy(s_volume, &volume, sizeof(volume));
-                q.memcpy(s_solver, &solver, sizeof(solver));
-                q.memcpy(s_params, &params, sizeof(params));
-                q.memcpy(s_thread_newparts, &thread_newparts, sizeof(thread_newparts));
+            for (int i=0;i<3;i++)
+                part->vel[i] += s_ions->charge/s_ions->mass*ef_part[i]*s_params->dt;
 
-                
-                auto iter = s_ions->particles.end() - s_ions->particles.begin();
-                
-                h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
-                {
-                    auto part = s_ions->particles.begin() + i;
+            /*update particle positions*/
+            for (int i=0;i<3;i++) part->pos[i]+=part->vel[i]*s_params->dt;
 
-                    /*update particle velocity*/
-                    double ef_part[3];
-                    //s_solver->evalEf(ef_part, part->cell_index);
+            //trace::current.enter("XtoLtet");
+            //bool inside = XtoLtet(part,s_volume);
+            bool cond = false;
+            bool inside;
 
-                    for (int i=0;i<3;i++) ef_part[i]=s_solver->ef[part->cell_index][i];
+            bool inside = d_XtoLtet(part,volume);
+            /*
+            while (cond == false){
+                auto &tet = s_volume->elements[part->cell_index];
 
-                    for (int i=0;i<3;i++)
-                        part->vel[i] += s_ions->charge/s_ions->mass*ef_part[i]*s_params->dt;
+                inside = true;
+                //loop over vertices
+                for (int i=0;i<4;i++) {
+                    part->lc[i] = (1.0/6.0)*(tet.alpha[i] - part->pos[0]*tet.beta[i] +
+                                part->pos[1]*tet.gamma[i] - part->pos[2]*tet.delta[i])/tet.volume;
+                    if (part->lc[i]<0 || part->lc[i]>1.0) inside=false;
+                    else cond = true;
+                }
 
-                    /*update particle positions*/
-                    for (int i=0;i<3;i++) part->pos[i]+=part->vel[i]*s_params->dt;
-
-                    //trace::current.enter("XtoLtet");
-                    //bool inside = XtoLtet(part,s_volume);
-                    
-                    auto &tet = s_volume->elements[part->cell_index];
-
-                    bool inside = true;
-                    /*loop over vertices*/
-                    for (int i=0;i<4;i++) {
-                        part->lc[i] = (1.0/6.0)*(tet.alpha[i] - part->pos[0]*tet.beta[i] +
-                                    part->pos[1]*tet.gamma[i] - part->pos[2]*tet.delta[i])/tet.volume;
-                        if (part->lc[i]<0 || part->lc[i]>1.0) inside=false;
-                    }
-
-                    //if (inside) return true;
-                    if (!inside){
+                //if (inside) return true;
+                if (!inside){
+                    cond = true;
                     //if (!search) return false;
-                    /*we are outside the last known tet, find most negative weight*/
+                    //we are outside the last known tet, find most negative weight
                     int min_i=0;
                     double min_lc=part->lc[0];
                     for (int i=1;i<4;i++)
                         if (part->lc[i]<min_lc) {min_lc=part->lc[i];min_i=i;}
 
-                    /*is there a neighbor in this direction?*/
+                    //is there a neighbor in this direction?
                     if (tet.cell_con[min_i]>=0) {
                         part->cell_index = tet.cell_con[min_i];
+                        cond = false;
                         //return XtoLtet(part,volume);
                     }
 
                     inside = false;
-                    }
-                        
-                    
-                    //trace::current.exit("XtoLtet");
+                }
+            }    
+            */
+            //trace::current.exit("XtoLtet");
 
-                    if (inside) {
-                        Tetra &tet = s_volume->elements[part->cell_index];
-                        /*now we know that we are inside this tetrahedron, scatter*/
-                        double sum=0;
-                        for (int v=0;v<4;v++) {
-                            #pragma omp atomic update
-                            s_ions->den[tet.con[v]]+=part->lc[v];
-                            sum+=part->lc[v];    /*for testing*/
-                        }
+            if (inside) {
+                Tetra &tet = s_volume->elements[part->cell_index];
+                /*now we know that we are inside this tetrahedron, scatter*/
+                double sum=0;
+                for (int v=0;v<4;v++) {
+                    #pragma omp atomic update
+                    s_ions->den[tet.con[v]]+=part->lc[v];
+                    sum+=part->lc[v];    /*for testing*/
+                }
 
-                        /*testing*/
-                        if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
+                /*testing*/
+                //if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
 
-                        s_thread_newparts->push_back(part);
-                    }
-                
-                });
-            }).wait();
-        }
+                //s_thread_newparts->push_back(part);
+            }
+        
+        });
+        q.memcpy(&ions, s_ions, sizeof(s_ions));
+        q.memcpy(&volume, s_volume, sizeof(s_volume));
+        q.memcpy(&solver, s_solver, sizeof(s_solver));
+        q.memcpy(&params, s_params, sizeof(s_params));
+        q.memcpy(&thread_newparts, s_thread_newparts, sizeof(s_thread_newparts));
+    }).wait();
 
-        #pragma omp master
-        {
-            ions.particles.clear();
-        }
-        #pragma omp barrier
-        #pragma omp critical
-        {
-            ions.particles.insert(ions.particles.end(), thread_newparts.begin(), thread_newparts.end());
-        }
-    }
+
+
+    ions.particles.clear();
+
+
+    ions.particles.insert(ions.particles.end(), thread_newparts.begin(), thread_newparts.end());
+
+    
 
     /*convert to ion density*/
     for (int n=0;n<n_nodes;n++) ions.den[n] *= ions.spwt/volume.nodes[n].volume;
