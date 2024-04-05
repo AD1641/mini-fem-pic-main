@@ -15,7 +15,7 @@ cmake -DCMAKE_CXX_COMPILER=icpx ..
 make
 
 
-cd mini-pic-fem-main/examples/one_stream/coarse
+cd ../examples/one_stream/coarse
 
 ../../../build/mini-pic system.param
 ## Introduction
