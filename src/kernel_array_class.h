@@ -1,3 +1,4 @@
+/*
 #pragma once
 
 #include<CL/sycl.hpp>
@@ -65,4 +66,4 @@ public:
     {
         return array_size;
     }
-};
+};*/
