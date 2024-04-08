@@ -334,7 +334,9 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                 /*testing*/
                 //if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
 
-                s_thread_newparts[i] = part;
+                s_thread_newparts[i].pos[i] = part->pos[i];
+                s_thread_newparts[i].vel[i] = part->vel[i];
+                s_thread_newparts[i].lc[i] = part->lc[i];
             }
         
         });
@@ -348,9 +350,18 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
 
     ions.particles.clear();
+    int end = 0;
+    printf("You entered: %d", thread_newparts[1000].vel[0]);
+    for (int j = 0; j < 1000; j++)
+    {
 
+    }
+    while (thread_newparts[end].vel[0] != nullptr)
+    {
+        end++;
+    }
 
-    ions.particles.insert(ions.particles.end(), thread_newparts.begin(), thread_newparts.end());
+    ions.particles.insert(ions.particles.end(), thread_newparts[0], thread_newparts[end]);
 
     
 
