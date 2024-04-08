@@ -28,3 +28,5 @@ Based on the `fem-pic` application by Lubos Brieda for Advanced PIC 2015 Lesson 
 
 
 rm -rf build; mkdir build; cd build; cmake -DCMAKE_CXX_COMPILER=icpx ..; make
+
+cd ../examples/one_stream/coarse; ../../../build/mini-pic system.param

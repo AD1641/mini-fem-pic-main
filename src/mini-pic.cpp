@@ -241,7 +241,8 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     sycl::queue q(sycl::property::queue::in_order{});
 
     //std::vector<Particle> thread_newparts;
-    std::array<Particle, 1000> thread_newparts;
+    //std::array<Particle, 1000> thread_newparts;
+    Particle* thread_newparts = (Particle*) malloc(1000 * sizeof(Particle));
 
     Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
     Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
@@ -249,7 +250,8 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
 
     //std::vector<Particle> *s_thread_newparts = static_cast<std::vector<Particle> *>(malloc_device(sizeof(thread_newparts), q));
-    std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
+    //std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
+    Particle *s_thread_newparts =static_cast<Particle *>(malloc_device(sizeof(thread_newparts), q));
     q.submit ([&](sycl::handler& h){
         
         q.memcpy(s_ions, &ions, sizeof(ions));
@@ -332,7 +334,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                 /*testing*/
                 //if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
 
-                //s_thread_newparts[i] = part;
+                s_thread_newparts[i] = part;
             }
         
         });
