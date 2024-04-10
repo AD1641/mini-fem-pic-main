@@ -358,8 +358,14 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     {
         end++;
     }
-
-    ions.particles.insert(ions.particles.end(), thread_newparts[0], thread_newparts[end]);
+    Particle* c_thread_newparts = (Particle*) malloc((end+1) * sizeof(Particle));
+    for(int j = 0; j<(end+1); j++)
+    {
+        //std::memcpy(c_thread_newparts[j], thread_newparts[j], sizeof(thread_newparts[j]));
+    }
+    std::set<Particle> s(thread_newparts, thread_newparts+end);
+    
+    ions.particles.insert(ions.particles.end(), thread_newparts->cbegin(), thread_newparts->cend());
 
     
 
