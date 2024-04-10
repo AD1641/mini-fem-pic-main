@@ -337,6 +337,8 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                 s_thread_newparts[i].pos[i] = part->pos[i];
                 s_thread_newparts[i].vel[i] = part->vel[i];
                 s_thread_newparts[i].lc[i] = part->lc[i];
+
+                //std::memcpy(s_thread_newparts[i], static_cast<Particle>(part), sizeof(part));
             }
         
         });
@@ -351,12 +353,8 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
     ions.particles.clear();
     int end = 0;
-    printf("You entered: %d", thread_newparts[1000].vel[0]);
-    for (int j = 0; j < 1000; j++)
-    {
-
-    }
-    while (thread_newparts[end].vel[0] != nullptr)
+    //printf("You entered: %d", thread_newparts[1000].vel[0]);
+    while (thread_newparts[end].vel[0] != NULL)
     {
         end++;
     }
