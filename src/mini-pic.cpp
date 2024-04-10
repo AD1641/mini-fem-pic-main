@@ -242,7 +242,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
     //std::vector<Particle> thread_newparts;
     //std::array<Particle, 1000> thread_newparts;
-    Particle* thread_newparts = (Particle*) malloc(1000 * sizeof(Particle));
+    Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
 
     Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
     Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
@@ -358,14 +358,15 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     {
         end++;
     }
-    Particle* c_thread_newparts = (Particle*) malloc((end+1) * sizeof(Particle));
+    std::vector<Particle> c_thread_newparts;
     for(int j = 0; j<(end+1); j++)
     {
         //std::memcpy(c_thread_newparts[j], thread_newparts[j], sizeof(thread_newparts[j]));
+        //c_thread_newparts.push_back(&thread_newparts[j]);
     }
-    std::set<Particle> s(thread_newparts, thread_newparts+end);
+
     
-    ions.particles.insert(ions.particles.end(), thread_newparts->cbegin(), thread_newparts->cend());
+    ions.particles.insert(ions.particles.end(), c_thread_newparts.begin(), c_thread_newparts.end());
 
     
 
