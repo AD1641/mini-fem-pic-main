@@ -18,6 +18,7 @@
 #include <omp.h>
 #include <CL/sycl.hpp>
 #include <sycl/types.hpp>
+#include <time.h>
 
 #include "parameters.h"
 #include "trace.h"
@@ -100,6 +101,10 @@ int main(int argc, char **argv) {
     /*main loop*/
     int ts;
     for (ts=0;ts<params.max_iter;ts++) {
+        struct timespec start, stop; 
+        double duration; 
+
+        clock_gettime(CLOCK_MONOTONIC, &start);
         /*sample new particles*/
         int n_new_particles = InjectIons(ions, volume, solver, params);
 
@@ -124,12 +129,15 @@ int main(int argc, char **argv) {
 
 
         if ((ts+1)%10==0) OutputMesh(ts,volume, solver.uh, solver.ef, ions.den);
-
+        clock_gettime(CLOCK_MONOTONIC, &stop); 
+        duration = (double) (stop.tv_sec * 1000000000 + stop.tv_nsec) - (start.tv_sec * 1000000000 + start.tv_nsec);
+        duration = duration/1000000000;
         std::cout<<"ts: "<<ts
                  <<"\t np: "<<ions.particles.size()
                  <<" (" <<  n_new_particles << " added, "<< old_nparts - ions.particles.size() << " removed)"
                  <<"\t max den: "<<max_den
                  <<"\t max |phi|: "<<max_phi
+                 <<"\t step duration: " << duration
                  <<std::endl;
     }
 
@@ -241,13 +249,14 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     sycl::queue q(sycl::property::queue::in_order{});
 
     //std::vector<Particle> thread_newparts;
-    // We could create the array as an array proper
-    std::array<Particle, 1000> arr_thread_newparts {};
 
-    //Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+    // We could create the array as an array proper
+    //std::array<Particle, 1000> arr_thread_newparts {};
+
+    Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
 
     // but we can access the data through a raw pointer on device
-    Particle* thread_newparts = arr_thread_newparts.data();
+    //Particle* thread_newparts = arr_thread_newparts.data();
 
     Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
     Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
@@ -379,11 +388,32 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
         //std::memcpy(c_thread_newparts[j], thread_newparts[j], sizeof(thread_newparts[j]));
         //c_thread_newparts.push_back(&thread_newparts[j]);
     }
-
+    const int c_end = end;
     // now we don't need to do this, because we have an Array representation too
-    //std::array<Particle, 1000> c_thread_newparts {thread_newparts};
+  
+    
+    std::array<Particle, 108> c_thread_newparts;
+    std::cout << end << std::endl;
+    for(int s = 0; s < end; s++)
+    {
+        for (int z = 0; z < 4; z++)
+        {
+            if(z < 3)
+            {
+                c_thread_newparts[s].pos[z] = thread_newparts[s].pos[z];
+                c_thread_newparts[s].vel[z] = thread_newparts[s].vel[z];
+                c_thread_newparts[s].lc[z] = thread_newparts[s].lc[z];
+            }
+            else
+            {
+                c_thread_newparts[s].lc[z] = thread_newparts[s].lc[z];
+            }
 
-    ions.particles.insert(ions.particles.end(), arr_thread_newparts.begin(), arr_thread_newparts.end());
+        }
+
+    }
+
+    ions.particles.insert(ions.particles.end(), c_thread_newparts.begin(), c_thread_newparts.end());
 
 
 
