@@ -241,9 +241,9 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     sycl::queue q(sycl::property::queue::in_order{});
 
     //std::vector<Particle> thread_newparts;
-    std::array<Particle, 1000> thread_newparts;
+    //std::array<Particle, 1000> thread_newparts;
 
-    //Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+    Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
 
     Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
     Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
@@ -251,8 +251,8 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
 
     //std::vector<Particle> *s_thread_newparts = static_cast<std::vector<Particle> *>(malloc_device(sizeof(thread_newparts), q));
-    std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
-    //Particle *s_thread_newparts =static_cast<Particle *>(malloc_device(sizeof(thread_newparts), q));
+    //std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
+    Particle *s_thread_newparts =static_cast<Particle *>(malloc_device(sizeof(thread_newparts), q));
     q.submit ([&](sycl::handler& h){
         
         q.memcpy(s_ions, &ions, sizeof(ions));
@@ -369,15 +369,16 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     {
         end++;
     }
-    std::vector<Particle> c_thread_newparts;
+    //std::vector<Particle> c_thread_newparts;
     for(int j = 0; j<(end+1); j++)
     {
         //std::memcpy(c_thread_newparts[j], thread_newparts[j], sizeof(thread_newparts[j]));
         //c_thread_newparts.push_back(&thread_newparts[j]);
     }
 
-    
-    ions.particles.insert(ions.particles.end(), thread_newparts.begin(), thread_newparts.end());
+    std::array<Particle, 1000> c_thread_newparts = {thread_newparts};
+
+    ions.particles.insert(ions.particles.end(), c_thread_newparts.begin(), c_thread_newparts.end());
 
     
 
