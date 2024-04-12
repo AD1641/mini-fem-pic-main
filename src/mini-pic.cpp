@@ -115,8 +115,8 @@ int main(int argc, char **argv) {
         /*check values*/
         double max_den=0;
         for (int n=0;n<n_nodes;n++) if (ions.den[n]>max_den) max_den=ions.den[n];
-        
-    
+
+
         double max_phi=0;
 
 
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
 
         std::cout<<"ts: "<<ts
                  <<"\t np: "<<ions.particles.size()
-                 <<" (" <<  n_new_particles << " added, "<< old_nparts - ions.particles.size() << " removed)" 
+                 <<" (" <<  n_new_particles << " added, "<< old_nparts - ions.particles.size() << " removed)"
                  <<"\t max den: "<<max_den
                  <<"\t max |phi|: "<<max_phi
                  <<std::endl;
@@ -241,9 +241,13 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     sycl::queue q(sycl::property::queue::in_order{});
 
     //std::vector<Particle> thread_newparts;
-    //std::array<Particle, 1000> thread_newparts;
+    // We could create the array as an array proper
+    std::array<Particle, 1000> arr_thread_newparts {};
 
-    Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+    //Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+
+    // but we can access the data through a raw pointer on device
+    Particle* thread_newparts = arr_thread_newparts.data();
 
     Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
     Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
@@ -254,16 +258,16 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     //std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
     Particle *s_thread_newparts =static_cast<Particle *>(malloc_device(sizeof(thread_newparts), q));
     q.submit ([&](sycl::handler& h){
-        
+
         q.memcpy(s_ions, &ions, sizeof(ions));
         q.memcpy(s_volume, &volume, sizeof(volume));
         q.memcpy(s_solver, &solver, sizeof(solver));
         q.memcpy(s_params, &params, sizeof(params));
         q.memcpy(s_thread_newparts, &thread_newparts, sizeof(thread_newparts));
 
-        
+
         auto iter = s_ions->particles.end() - s_ions->particles.begin();
-        
+
         h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
         {
             auto part = s_ions->particles.begin() + i;
@@ -318,7 +322,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
 
                     inside = false;
                 }
-            }    
+            }
             //*/
             //trace::current.exit("XtoLtet");
 
@@ -346,12 +350,12 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
                     {
                         s_thread_newparts[i].lc[z] = part->lc[z];
                     }
-                    
+
                 }
-                
+
                 //std::memcpy(s_thread_newparts[i], static_cast<Particle>(part), sizeof(part));
             }
-        
+
         });
         q.memcpy(&ions, s_ions, sizeof(s_ions));
         q.memcpy(&volume, s_volume, sizeof(s_volume));
@@ -376,11 +380,12 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
         //c_thread_newparts.push_back(&thread_newparts[j]);
     }
 
-    std::array<Particle, 1000> c_thread_newparts = {thread_newparts};
+    // now we don't need to do this, because we have an Array representation too
+    //std::array<Particle, 1000> c_thread_newparts {thread_newparts};
 
-    ions.particles.insert(ions.particles.end(), c_thread_newparts.begin(), c_thread_newparts.end());
+    ions.particles.insert(ions.particles.end(), arr_thread_newparts.begin(), arr_thread_newparts.end());
 
-    
+
 
     /*convert to ion density*/
     for (int n=0;n<n_nodes;n++) ions.den[n] *= ions.spwt/volume.nodes[n].volume;
