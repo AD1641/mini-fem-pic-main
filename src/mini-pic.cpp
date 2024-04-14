@@ -253,7 +253,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     // We could create the array as an array proper
     //std::array<Particle, 1000> arr_thread_newparts {};
 
-    Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+    Particle* thread_newparts = (Particle*) malloc(150 * sizeof(Particle));
 
     // but we can access the data through a raw pointer on device
     //Particle* thread_newparts = arr_thread_newparts.data();
@@ -392,7 +392,7 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     // now we don't need to do this, because we have an Array representation too
   
     
-    std::array<Particle, 108> c_thread_newparts;
+    std::array<Particle, 150> c_thread_newparts;
     std::cout << end << std::endl;
     for(int s = 0; s < end; s++)
     {
@@ -420,4 +420,3 @@ void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters p
     /*convert to ion density*/
     for (int n=0;n<n_nodes;n++) ions.den[n] *= ions.spwt/volume.nodes[n].volume;
 }
-
