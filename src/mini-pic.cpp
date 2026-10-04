@@ -16,8 +16,7 @@
 #include <chrono>
 #include <iomanip>
 #include <omp.h>
-#include <CL/sycl.hpp>
-#include <sycl/types.hpp>
+#include <sycl/sycl.hpp>
 #include <time.h>
 
 #include "parameters.h"
@@ -26,7 +25,6 @@
 #include "particles.h"
 #include "meshes.h"
 #include "FESolver.h"
-#include "kernel_array_class.h"
 
 /*constants*/
 
@@ -35,11 +33,30 @@ Trace trace::current = Trace("__TRACE_BASE__");
 
 std::time_t start_time;
 
+/*Copies of the data that MoveParticles needs on the SYCL device. The mesh never
+changes so it is copied over once, the particles, electric field and ion density
+are copied to and from the device every time step*/
+struct DeviceData {
+    sycl::queue q;
+    int n_nodes;
+    int n_elements;
+    Tetra *elements;            /*mesh elements*/
+    double (*ef)[3];            /*electric field in each element*/
+    double *den;                /*ion density on each node*/
+    Particle *particles = nullptr;
+    size_t max_particles = 0;   /*number of particles there is room for*/
+
+    DeviceData(Volume &volume);
+    ~DeviceData();
+    DeviceData(const DeviceData &) = delete;
+    void reserveParticles(size_t n);
+};
+
 /*PROTOTYPES*/
 void write_header(std::ostream& out);
 void write_footer(std::ostream& out);
 int InjectIons(Species &ions, Volume &volume, FESolver &solver, Parameters params);
-void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters params);
+void MoveParticles(Species &ions, Volume &volume, FESolver &solver, const Parameters &params, DeviceData &device);
 
 
 /**************** MAIN **************************/
@@ -98,6 +115,10 @@ int main(int argc, char **argv) {
     ions.mass = 16*AMU;
     ions.spwt = 2e2;
 
+    /*set up the SYCL device used to move the particles*/
+    DeviceData device(volume);
+    std::cout << "SYCL device: " << device.q.get_device().get_info<sycl::info::device::name>() << std::endl << std::endl;
+
     /*main loop*/
     int ts;
     for (ts=0;ts<params.max_iter;ts++) {
@@ -111,7 +132,7 @@ int main(int argc, char **argv) {
         int old_nparts = ions.particles.size();
         /*update velocity and move particles*/
         clock_gettime(CLOCK_MONOTONIC, &start);
-        MoveParticles(ions, volume, solver, params);
+        MoveParticles(ions, volume, solver, params, device);
         clock_gettime(CLOCK_MONOTONIC, &stop); 
         duration = (double) (stop.tv_sec * 1000000000 + stop.tv_nsec) - (start.tv_sec * 1000000000 + start.tv_nsec);
         duration = duration/1000000000;
@@ -243,154 +264,92 @@ int InjectIons(Species &ions, Volume &volume, FESolver &solver, Parameters param
     return total_new_particles;
 }
 
-/*updates ion velocities and positions*/
-void MoveParticles(Species &ions, Volume &volume, FESolver &solver, Parameters params) {    TRACE_ME;
+/*updates ion velocities and positions on the SYCL device*/
+void MoveParticles(Species &ions, Volume &volume, FESolver &solver, const Parameters &params, DeviceData &device) {    TRACE_ME;
     int n_nodes = (int) volume.nodes.size();
+    size_t n_parts = ions.particles.size();
+    sycl::queue &q = device.q;
 
-    /*reset ion density*/
-    for (int i=0;i<n_nodes;i++) ions.den[i] = 0;
+    /*copy the particles and electric field to the device and reset the ion density*/
+    device.reserveParticles(n_parts);
+    q.memcpy(device.particles, ions.particles.data(), n_parts*sizeof(Particle));
+    q.memcpy(device.ef, solver.ef, device.n_elements*sizeof(double[3]));
+    q.fill(device.den, 0.0, n_nodes);
 
-    sycl::queue q(sycl::property::queue::in_order{});
+    /*the kernel can only use plain values and device pointers, not the host objects*/
+    Particle *particles = device.particles;
+    const Tetra *elements = device.elements;
+    const double (*ef)[3] = device.ef;
+    double *den = device.den;
+    double q_over_m = ions.charge/ions.mass;
+    double dt = params.dt;
 
-    
-    std::array<Particle, 1000> thread_newparts;
-    //Particle* thread_newparts = (Particle*) malloc(100 * sizeof(Particle));
+    q.parallel_for(sycl::range<1>(n_parts), [=](sycl::id<1> p) {
+        Particle &part = particles[p];
 
-    Species *s_ions = static_cast<Species *>(malloc_device(sizeof(ions), q));
-    Volume *s_volume = static_cast<Volume *>(malloc_device(sizeof(volume), q));
-    FESolver *s_solver = static_cast<FESolver *>(malloc_device(sizeof(solver), q));
-    Parameters *s_params = static_cast<Parameters *>(malloc_device(sizeof(params), q));
+        /*update particle velocity*/
+        for (int i=0;i<3;i++)
+            part.vel[i] += q_over_m*ef[part.cell_index][i]*dt;
 
-    
-    std::array<Particle, 1000> *s_thread_newparts =static_cast<std::array<Particle, 1000> *>(malloc_device(sizeof(thread_newparts), q));
-    //Particle *s_thread_newparts =static_cast<Particle *>(malloc_device(sizeof(thread_newparts), q));
+        /*update particle positions*/
+        for (int i=0;i<3;i++) part.pos[i]+=part.vel[i]*dt;
 
-    q.submit ([&](sycl::handler& h){
-        
-        q.memcpy(s_ions, &ions, sizeof(ions));
-        q.memcpy(s_volume, &volume, sizeof(volume));
-        q.memcpy(s_solver, &solver, sizeof(solver));
-        q.memcpy(s_params, &params, sizeof(params));
-        q.memcpy(s_thread_newparts, &thread_newparts, sizeof(thread_newparts));
-
-        
-        auto iter = s_ions->particles.end() - s_ions->particles.begin();
-        
-        h.parallel_for(sycl::range<1>{static_cast<unsigned long>(iter)},[=] (sycl::id<1> i)
-        {
-            auto part = s_ions->particles.begin() + i;
-
-            /*update particle velocity*/
-            double ef_part[3];
-            //s_solver->evalEf(ef_part, part->cell_index);
-
-            for (int i=0;i<3;i++) ef_part[i]=s_solver->ef[part->cell_index][i];
-
-            for (int i=0;i<3;i++)
-                part->vel[i] += s_ions->charge/s_ions->mass*ef_part[i]*s_params->dt;
-
-            /*update particle positions*/
-            for (int i=0;i<3;i++) part->pos[i]+=part->vel[i]*s_params->dt;
-
-            
-            bool cond = false;
-            bool inside;
-
-            
-            while (cond == false){
-                auto &tet = s_volume->elements[part->cell_index];
-
-                inside = true;
-                //loop over vertices
-                for (int i=0;i<4;i++) {
-                    part->lc[i] = (1.0/6.0)*(tet.alpha[i] - part->pos[0]*tet.beta[i] +
-                                part->pos[1]*tet.gamma[i] - part->pos[2]*tet.delta[i])/tet.volume;
-                    if (part->lc[i]<0 || part->lc[i]>1.0) inside=false;
-                    else cond = true;
-                }
-
-                //if (inside) return true;
-                if (!inside){
-                    cond = true;
-                    //if (!search) return false;
-                    //we are outside the last known tet, find most negative weight
-                    int min_i=0;
-                    double min_lc=part->lc[0];
-                    for (int i=1;i<4;i++)
-                        if (part->lc[i]<min_lc) {min_lc=part->lc[i];min_i=i;}
-
-                    //is there a neighbor in this direction?
-                    if (tet.cell_con[min_i]>=0) {
-                        part->cell_index = tet.cell_con[min_i];
-                        cond = false;
-                        //return XtoLtet(part,volume);
-                    }
-
-                    inside = false;
-                }
-            }    
-            
-            if (inside) {
-                Tetra &tet = s_volume->elements[part->cell_index];
-                /*now we know that we are inside this tetrahedron, scatter*/
-                double sum=0;
-                for (int v=0;v<4;v++) {
-                    #pragma omp atomic update
-                    s_ions->den[tet.con[v]]+=part->lc[v];
-                    sum+=part->lc[v];    /*for testing*/
-                }
-
-                /*testing*/
-                //if (std::abs(sum-1.0)>0.001) std::cout<<sum<<std::endl;
-                
-                // for (int z = 0; z < 4; z++)
-                // {
-                //     s_thread_newparts[i].cell_index = part->cell_index;
-                //     if(z < 3)
-                //     {
-                //         s_thread_newparts[i].pos[z] = part->pos[z];
-                //         s_thread_newparts[i].vel[z] = part->vel[z];
-                //         s_thread_newparts[i].lc[z] = part->lc[z];
-                //     }
-                //     else
-                //     {
-                //         s_thread_newparts[i].lc[z] = part->lc[z];
-                //     }
-                    
-                // }
-                
-                //std::memcpy(s_thread_newparts[i], static_cast<Particle>(part), sizeof(part));
+        if (XtoLtet(part, elements)) {
+            const Tetra &tet = elements[part.cell_index];
+            /*now we know that we are inside this tetrahedron, scatter*/
+            for (int v=0;v<4;v++) {
+                sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device,
+                                 sycl::access::address_space::global_space> node_den(den[tet.con[v]]);
+                node_den.fetch_add(part.lc[v]);
             }
-        
-        });
-        q.memcpy(&ions, s_ions, sizeof(s_ions));
-        q.memcpy(&volume, s_volume, sizeof(s_volume));
-        q.memcpy(&solver, s_solver, sizeof(s_solver));
-        q.memcpy(&params, s_params, sizeof(s_params));
-        q.memcpy(&thread_newparts, s_thread_newparts, sizeof(s_thread_newparts));
-    }).wait();
+        } else {
+            part.cell_index = -1;    /*particle has left the domain, flag it for removal*/
+        }
+    });
 
+    /*copy the particles and ion density back*/
+    q.memcpy(ions.particles.data(), particles, n_parts*sizeof(Particle));
+    q.memcpy(ions.den, den, n_nodes*sizeof(double));
+    q.wait();
 
-
-    ions.particles.clear();
-    int end = 0;
-    //printf("You entered: %d", thread_newparts[1000].vel[0]);
-    // while (thread_newparts[end].vel[0] != NULL)
-    // {
-    //     end++;
-    // }
-    // std::vector<Particle> c_thread_newparts;
-    
-    // for (int i = 0; i < end; i++)
-    // {
-    //     c_thread_newparts.push_back(thread_newparts[i]);
-    // }
-
-    
-    ions.particles.insert(ions.particles.end(), thread_newparts.begin(), thread_newparts.end());
-
-    
+    /*remove the particles that left the domain*/
+    std::erase_if(ions.particles, [](const Particle &part) {return part.cell_index<0;});
 
     /*convert to ion density*/
     for (int n=0;n<n_nodes;n++) ions.den[n] *= ions.spwt/volume.nodes[n].volume;
+}
+
+DeviceData::DeviceData(Volume &volume): q(sycl::property::queue::in_order{}) {
+    sycl::device dev = q.get_device();
+    if (!dev.has(sycl::aspect::fp64) || !dev.has(sycl::aspect::atomic64)) {
+        std::cerr<<"SYCL device "<<dev.get_info<sycl::info::device::name>()<<" does not support double precision"<<std::endl;
+        exit(-1);
+    }
+
+    n_nodes = volume.nodes.size();
+    n_elements = volume.elements.size();
+    elements = sycl::malloc_device<Tetra>(n_elements, q);
+    ef = sycl::malloc_device<double[3]>(n_elements, q);
+    den = sycl::malloc_device<double>(n_nodes, q);
+    if (!elements || !ef || !den) {std::cerr<<"Failed to allocate the mesh on the SYCL device"<<std::endl;exit(-1);}
+
+    /*the mesh doesn't change, so only needs copying once*/
+    q.memcpy(elements, volume.elements.data(), n_elements*sizeof(Tetra)).wait();
+}
+
+DeviceData::~DeviceData() {
+    sycl::free(elements, q);
+    sycl::free(ef, q);
+    sycl::free(den, q);
+    if (particles) sycl::free(particles, q);
+}
+
+/*makes sure there is room for n particles on the device*/
+void DeviceData::reserveParticles(size_t n) {
+    if (n <= max_particles) return;
+    if (particles) sycl::free(particles, q);
+
+    max_particles = 2*n;    /*leave room to grow so we don't reallocate every time step*/
+    particles = sycl::malloc_device<Particle>(max_particles, q);
+    if (!particles) {std::cerr<<"Failed to allocate "<<max_particles<<" particles on the SYCL device"<<std::endl;exit(-1);}
 }

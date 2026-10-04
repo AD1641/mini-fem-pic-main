@@ -357,7 +357,7 @@ bool LoadSurfaceMesh(const std::string file_name, Volume &volume, NodeType node_
 }
 
 /*saves volume mesh*/
-void OutputMesh(int ts, Volume &volume, double *phi, double **ef, double *ion_den) { TRACE_ME;
+void OutputMesh(int ts, Volume &volume, double *phi, double (*ef)[3], double *ion_den) { TRACE_ME;
     std::stringstream ss;
     ss<<"mesh_"<<std::setfill('0')<<std::setw(4)<<ts+1<<".vtu";
     std::ofstream out(ss.str());
@@ -452,33 +452,7 @@ void OutputMesh(int ts, Volume &volume, double *phi, double **ef, double *ion_de
 Returns true if particle matched to a tet
 */
 bool XtoLtet(Particle &part, Volume &volume, bool search) {
-    /*first try the current tetrahedron*/
-    Tetra &tet = volume.elements[part.cell_index];
-
-    bool inside = true;
-    /*loop over vertices*/
-    for (int i=0;i<4;i++) {
-        part.lc[i] = (1.0/6.0)*(tet.alpha[i] - part.pos[0]*tet.beta[i] +
-                      part.pos[1]*tet.gamma[i] - part.pos[2]*tet.delta[i])/tet.volume;
-        if (part.lc[i]<0 || part.lc[i]>1.0) inside=false;
-    }
-
-    if (inside) return true;
-
-    if (!search) return false;
-    /*we are outside the last known tet, find most negative weight*/
-    int min_i=0;
-    double min_lc=part.lc[0];
-    for (int i=1;i<4;i++)
-        if (part.lc[i]<min_lc) {min_lc=part.lc[i];min_i=i;}
-
-    /*is there a neighbor in this direction?*/
-    if (tet.cell_con[min_i]>=0) {
-        part.cell_index = tet.cell_con[min_i];
-        return XtoLtet(part,volume);
-    }
-
-    return false;
+    return XtoLtet(part, volume.elements.data(), search);
 }
 
 void Volume::summarize(std::ostream &out) {

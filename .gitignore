@@ -1,0 +1,14 @@
+# Build directories (cmake -S . -B build, Visual Studio's out/, CLion's cmake-build-*)
+build/
+out/
+cmake-build-*/
+
+# Editor and OS files
+.vs/
+.idea/
+.DS_Store
+
+# Simulation output, written to whichever directory mini-pic is run from
+mesh_*.vtu
+particles.vtp
+trace.csv

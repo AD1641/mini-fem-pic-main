@@ -15,7 +15,6 @@
 
 #include <vector>
 #include <string>
-#include <CL/sycl.hpp>
 
 #include "particles.h"
 
@@ -63,13 +62,41 @@ struct Volume {
 
     void summarize(std::ostream &out);
 };
-// template<>
-// struct sycl::is_device_copyable<Volume> : std::true_type {};
 
 bool LoadVolumeMesh(const std::string file_name, Volume &volume);
 bool LoadSurfaceMesh(const std::string file_name, Volume &volume, NodeType node_type, bool invert_faces);
-void OutputMesh(int ts, Volume &volume, double *phi, double **ef, double *ion_den);
+void OutputMesh(int ts, Volume &volume, double *phi, double (*ef)[3], double *ion_den);
 
 bool XtoLtet(Particle &part, Volume &volume, bool search=true);
+
+/*converts physical coordinate to logical, walking through neighbouring tets
+until the one containing the particle is found. Returns true if particle matched to a tet.
+Uses a loop rather than recursion and plain arrays so it can also be called from a SYCL kernel*/
+inline bool XtoLtet(Particle &part, const Tetra *elements, bool search=true) {
+    while (true) {
+        const Tetra &tet = elements[part.cell_index];
+
+        bool inside = true;
+        /*loop over vertices*/
+        for (int i=0;i<4;i++) {
+            part.lc[i] = (1.0/6.0)*(tet.alpha[i] - part.pos[0]*tet.beta[i] +
+                          part.pos[1]*tet.gamma[i] - part.pos[2]*tet.delta[i])/tet.volume;
+            if (part.lc[i]<0 || part.lc[i]>1.0) inside=false;
+        }
+
+        if (inside) return true;
+
+        if (!search) return false;
+        /*we are outside the last known tet, find most negative weight*/
+        int min_i=0;
+        double min_lc=part.lc[0];
+        for (int i=1;i<4;i++)
+            if (part.lc[i]<min_lc) {min_lc=part.lc[i];min_i=i;}
+
+        /*is there a neighbor in this direction? if not the particle has left the domain*/
+        if (tet.cell_con[min_i]<0) return false;
+        part.cell_index = tet.cell_con[min_i];
+    }
+}
 
 #endif /* !MESHES_H */

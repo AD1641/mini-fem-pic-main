@@ -13,7 +13,6 @@
 
 #include <string>
 #include <map>
-#include <CL/sycl.hpp>
 
 #include "particles.h"
 #include "FESolver.h"
@@ -38,9 +37,6 @@ class Parameters{
         FESolver::Method fesolver_method = FESolver::NonLinear;
 
 };
-// template<>
-// struct sycl::is_device_copyable<Particle> : std::true_type {};
-
 
 #endif /* !PARAMETERS_H */
 

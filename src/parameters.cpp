@@ -21,8 +21,9 @@ Parameters::Parameters(std::string filename) {
 
     std::string line;
     while(std::getline(params_file, line)) {
-        // Filter out the comments and skip blank lines
-        std::regex_replace(line, std::regex("\\s*\\(#.*\\)\\?$"), "");
+        // Filter out the comments and skip blank lines (also copes with Windows line endings)
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        line = std::regex_replace(line, std::regex("\\s*(#.*)?$"), "");
         if (line.length() == 0) continue;
 
         std::smatch matches;

@@ -100,10 +100,8 @@ FESolver::FESolver(Volume &volume):volume(volume) { TRACE_ME;
 
     detJ = new double[n_elements];
 
-    /*electric field*/
-    ef = new double*[n_elements];
-    for (int n=0;n<n_elements;n++)
-        ef[n] = new double[3];
+    /*electric field, zero until the first solve*/
+    ef = new double[n_elements][3]();
 
     /*set up the ID array
     note valid values are 0 to neq-1 and -1 indicates "g" node*/
@@ -137,7 +135,6 @@ FESolver::~FESolver() { TRACE_ME;
         delete NX[e];
     }
 
-    for (int e=0;e<n_elements;e++)    delete[] ef[e];
     delete[] ef;
 
     delete[] K;

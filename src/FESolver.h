@@ -12,7 +12,6 @@
 
 #ifndef FESOLVER_H
 #define FESOLVER_H
-#include <CL/sycl.hpp>
 
 #include "meshes.h"
 
@@ -47,7 +46,7 @@ public:
     double *g;        /*g[n] essential boundaries*/
     double *uh;        /*uh[n] solution on nodes, union of d and g*/
 
-    double **ef;    /*ef[e][3] is the electric field in cell e*/
+    double (*ef)[3];    /*ef[e][3] is the electric field in cell e, stored contiguously so it can be copied to the SYCL device in one go*/
 
     double *detJ; /*determinant of the jacobian x_xi*/
 
@@ -90,9 +89,6 @@ protected:
     double W[2];
     int n_int;
 };
-// template<>
-// struct sycl::is_device_copyable<FESolver> : std::true_type {};
-
 
 
 #endif /* !FESOLVER_H */
